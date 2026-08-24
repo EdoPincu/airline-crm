@@ -1,10 +1,8 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { db, applyStoredTheme, fetchStaff } from "./auth.js";
 
-const { url, key } = window.CRM_CONFIG;
-const db = createClient(url, key);
 const root = document.getElementById("root");
 
-const state = { view: "dashboard", session: null, flights: [], customers: [], orders: [], q: "", modal: null };
+const state = { view: "dashboard", session: null, me: null, flights: [], customers: [], orders: [], staff: [], q: "", modal: null };
 
 /* ------------------------------------------------------------- utilities */
 const esc = (s) =>
@@ -42,6 +40,12 @@ async function loadAll() {
   state.flights = f.data || [];
   state.customers = c.data || [];
   state.orders = o.data || [];
+
+  if (isAdmin()) {
+    const st = await db.from("staff").select("*").order("created_at", { ascending: false });
+    if (st.error) toast(st.error.message);
+    state.staff = st.data || [];
+  }
 }
 
 async function mutate(fn, okMsg) {
@@ -53,28 +57,21 @@ async function mutate(fn, okMsg) {
   if (okMsg) toast(okMsg);
 }
 
-/* ------------------------------------------------------------------ auth */
-function renderAuth(err) {
+/* ------------------------------------------------------------------ gate */
+function renderGate({ icon, title, body, showSignOut = true }) {
   root.innerHTML = `
-    <div class="auth-wrap"><form class="auth-card" id="login">
-      <div class="brand"><div class="brand-mark">✈</div>
-        <div><div class="brand-name">Skyline CRM</div><div class="brand-sub">Airline operations</div></div></div>
-      <h1>Staff sign in</h1>
-      <p class="sub">Customer records are RLS-protected. Sign in to continue.</p>
-      ${err ? `<div class="auth-err">${esc(err)}</div>` : ""}
-      <div class="field"><label for="em">Email</label><input id="em" type="email" required autocomplete="username"></div>
-      <div class="field"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password"></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px">Sign in</button>
-    </form></div>`;
-  document.getElementById("login").onsubmit = async (e) => {
-    e.preventDefault();
-    const { error } = await db.auth.signInWithPassword({
-      email: e.target.em.value.trim(),
-      password: e.target.pw.value,
-    });
-    if (error) renderAuth(error.message);
-    else boot();
-  };
+    <div class="gate"><div class="gate-card">
+      <div class="gate-icon" aria-hidden="true">${icon}</div>
+      <h1>${title}</h1>
+      <p>${body}</p>
+      <div class="gate-actions">
+        ${showSignOut ? '<button class="btn" id="gate-signout">Sign out</button>' : ""}
+        <button class="btn btn-primary" id="gate-recheck">Check again</button>
+      </div>
+    </div></div>`;
+  const so = document.getElementById("gate-signout");
+  if (so) so.onclick = async () => { await db.auth.signOut(); location.replace("login.html"); };
+  document.getElementById("gate-recheck").onclick = () => boot();
 }
 
 /* ----------------------------------------------------------------- shell */
@@ -84,6 +81,8 @@ const NAV = [
   ["customers", "☺", "Customers"],
   ["orders", "🎟", "Orders"],
 ];
+const isAdmin = () => state.me?.role === "admin";
+const navItems = () => (isAdmin() ? [...NAV, ["staff", "⚿", "Staff"]] : NAV);
 
 function render() {
   const v = state.view;
@@ -93,11 +92,12 @@ function render() {
         <div class="brand"><div class="brand-mark">✈</div>
           <div><div class="brand-name">Skyline CRM</div><div class="brand-sub">Airline operations</div></div></div>
         <nav class="nav">
-          ${NAV.map(([id, ic, label]) =>
+          ${navItems().map(([id, ic, label]) =>
             `<button data-view="${id}" ${v === id ? 'aria-current="page"' : ""}><span aria-hidden="true">${ic}</span>${label}</button>`).join("")}
         </nav>
         <div class="sidebar-foot">
-          <div class="who">${esc(state.session?.user?.email || "")}</div>
+          <div class="who">${esc(state.me?.full_name || state.session?.user?.email || "")}
+            ${isAdmin() ? '<span class="pill pill-info" style="margin-left:6px">admin</span>' : ""}</div>
           <button class="btn btn-sm" id="theme">Toggle theme</button>
           <button class="btn btn-sm" id="signout">Sign out</button>
         </div>
@@ -105,7 +105,8 @@ function render() {
       <main class="main">${
         v === "dashboard" ? viewDashboard() :
         v === "flights" ? viewFlights() :
-        v === "customers" ? viewCustomers() : viewOrders()
+        v === "customers" ? viewCustomers() :
+        v === "staff" ? viewStaff() : viewOrders()
       }</main>
     </div>
     ${state.modal ? renderModal() : ""}`;
@@ -115,7 +116,7 @@ function render() {
 function wire() {
   root.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { state.view = b.dataset.view; state.q = ""; render(); }));
   const so = document.getElementById("signout");
-  if (so) so.onclick = async () => { await db.auth.signOut(); state.session = null; renderAuth(); };
+  if (so) so.onclick = async () => { await db.auth.signOut(); location.replace("login.html"); };
   const th = document.getElementById("theme");
   if (th) th.onclick = () => {
     const cur = document.documentElement.getAttribute("data-theme");
@@ -125,9 +126,16 @@ function wire() {
     try { localStorage.setItem("crm-theme", next); } catch {}
   };
   const s = document.getElementById("q");
-  if (s) s.oninput = (e) => { state.q = e.target.value; const f = document.getElementById("rows"); if (f) f.innerHTML = currentRows(); bindRowActions(); };
+  if (s) s.oninput = (e) => {
+    state.q = e.target.value;
+    const f = document.getElementById("rows");
+    if (f) f.innerHTML = currentRows();
+    bindRowActions();
+    bindStaffActions();
+  };
   root.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => { state.modal = b.dataset.open; render(); }));
   bindRowActions();
+  bindStaffActions();
   bindModal();
 }
 
@@ -188,6 +196,7 @@ function currentRows() {
   if (state.view === "flights") return flightRows();
   if (state.view === "customers") return customerRows();
   if (state.view === "orders") return orderRows();
+  if (state.view === "staff") return staffRows(state.staff.filter((m) => match(`${m.full_name || ""} ${m.email} ${m.role} ${m.status}`)));
   return "";
 }
 
@@ -278,6 +287,61 @@ function viewOrders() {
   return shell("Orders", "Bookings linking customers to flights.", "New order", "order",
     `<th>Booking</th><th>Customer</th><th>Flight</th><th>Cabin</th><th>Status</th><th class="num">Total</th><th></th>`,
     orderRows());
+}
+
+/* ------------------------------------------------------------ staff admin */
+function viewStaff() {
+  const rows = state.staff.filter((m) => match(`${m.full_name || ""} ${m.email} ${m.role} ${m.status}`));
+  const pending = state.staff.filter((m) => m.status === "pending").length;
+  return `
+    <div class="page-head">
+      <div><h1>Staff</h1><p>${pending ? `<strong>${pending}</strong> account${pending === 1 ? "" : "s"} waiting for approval.` : "Everyone who can sign in to this CRM."}</p></div>
+      <div class="head-actions"><input id="q" class="search" placeholder="Search…" value="${esc(state.q)}"></div>
+    </div>
+    <div class="card"><div class="table-scroll"><table>
+      <thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Requested</th><th></th></tr></thead>
+      <tbody id="rows">${staffRows(rows)}</tbody>
+    </table></div></div>`;
+}
+
+function staffRows(rows) {
+  if (!rows.length) return `<tr><td colspan="5" class="empty">No staff match.</td></tr>`;
+  return rows.map((m) => {
+    const self = m.id === state.session?.user?.id;
+    return `<tr>
+      <td><strong>${esc(m.full_name || "—")}</strong>${self ? ' <span class="sub">(you)</span>' : ""}
+          <div class="sub">${esc(m.email)}</div></td>
+      <td>${self ? pill(m.role) : `<select class="btn-sm" data-role="${m.id}" style="padding:4px 8px;width:auto">
+            ${["agent", "admin"].map((r) => `<option value="${r}" ${m.role === r ? "selected" : ""}>${r}</option>`).join("")}
+          </select>`}</td>
+      <td>${pill(m.status)}</td>
+      <td class="sub">${day(m.created_at)}</td>
+      <td>${self ? "" : staffActions(m)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function staffActions(m) {
+  if (m.status === "pending") return `
+    <button class="btn btn-sm btn-primary" data-approve="${m.id}">Approve</button>
+    <button class="btn btn-sm btn-ghost btn-danger" data-suspend="${m.id}">Reject</button>`;
+  if (m.status === "approved") return `<button class="btn btn-sm btn-ghost btn-danger" data-suspend="${m.id}">Suspend</button>`;
+  return `<button class="btn btn-sm" data-approve="${m.id}">Reinstate</button>`;
+}
+
+function bindStaffActions() {
+  document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () =>
+    mutate(() => db.from("staff").update({
+      status: "approved", approved_at: new Date().toISOString(), approved_by: state.session.user.id,
+    }).eq("id", b.dataset.approve), "Access approved")));
+
+  document.querySelectorAll("[data-suspend]").forEach((b) => (b.onclick = () => {
+    if (confirm("Revoke this person's access to the CRM?"))
+      mutate(() => db.from("staff").update({ status: "suspended" }).eq("id", b.dataset.suspend), "Access revoked");
+  }));
+
+  document.querySelectorAll("[data-role]").forEach((sel) => (sel.onchange = () =>
+    mutate(() => db.from("staff").update({ role: sel.value }).eq("id", sel.dataset.role), "Role updated")));
 }
 
 /* ----------------------------------------------------------------- modal */
@@ -379,15 +443,27 @@ function bindModal() {
 }
 
 /* ------------------------------------------------------------------ boot */
-try {
-  const t = localStorage.getItem("crm-theme");
-  if (t) document.documentElement.setAttribute("data-theme", t);
-} catch {}
+applyStoredTheme();
 
 async function boot() {
   const { data } = await db.auth.getSession();
   state.session = data.session;
-  if (!state.session) return renderAuth();
+  if (!state.session) return location.replace("login.html");
+
+  const { staff, error } = await fetchStaff();
+  if (error) return renderGate({ icon: "⚠", title: "Couldn't load your account", body: esc(error) });
+
+  state.me = staff;
+  if (!staff)
+    return renderGate({ icon: "⏳", title: "Account not provisioned yet",
+      body: "Your login works, but no staff record exists for it. An administrator needs to add you." });
+  if (staff.status === "pending")
+    return renderGate({ icon: "⏳", title: "Waiting for approval",
+      body: "Your account was created but an administrator hasn't approved it yet. You'll see the CRM here once they do." });
+  if (staff.status === "suspended")
+    return renderGate({ icon: "⛔", title: "Access suspended",
+      body: "An administrator has revoked your access to this CRM." });
+
   await loadAll();
   render();
 }

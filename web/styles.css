@@ -161,3 +161,22 @@ tbody tr:hover { background: var(--surface-2); }
   .main { padding: 18px 16px 50px; }
   .modal-body { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------- auth pages */
+.auth-ok { background: var(--ok-soft); color: var(--ok); padding: 11px 13px; border-radius: 9px; font-size: 13px; margin-bottom: 13px; line-height: 1.5; }
+.auth-ok a, .auth-err a { color: inherit; font-weight: 600; }
+.auth-submit { width: 100%; margin-top: 8px; }
+.auth-alt { text-align: center; font-size: 13.5px; color: var(--muted); margin: 16px 0 0; }
+.auth-alt a { color: var(--brand); font-weight: 600; text-decoration: none; }
+.auth-alt a:hover { text-decoration: underline; }
+.hint { font-size: 12px; color: var(--muted); }
+.hint-ok { color: var(--ok); }
+input:disabled, button:disabled { opacity: .6; cursor: not-allowed; }
+
+/* --------------------------------------------------- pending screen */
+.gate { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
+.gate-card { width: min(460px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); padding: 32px; text-align: center; }
+.gate-icon { font-size: 34px; margin-bottom: 10px; }
+.gate-card h1 { font-size: 19px; margin-bottom: 8px; }
+.gate-card p { color: var(--muted); font-size: 14px; margin: 0 0 8px; line-height: 1.55; }
+.gate-actions { display: flex; gap: 8px; justify-content: center; margin-top: 20px; }
