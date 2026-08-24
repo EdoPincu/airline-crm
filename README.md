@@ -1,5 +1,11 @@
 # Skyline CRM — Airline Customer Relationship Management
 
+> **You are on the `demo-no-login` branch.** The app runs entirely in your
+> browser against bundled fixtures in `web/fixtures.js` — no login, no Supabase
+> connection, and no API key in this branch at all. Edits persist to
+> localStorage and there is a **Reset demo data** button in the sidebar.
+> Switch to `main` for the real, RLS-protected build.
+
 A small CRM for an airline: **flights**, **customers**, and **orders**, backed by
 Supabase (Postgres + Auth + Data API) with a zero-build web front end.
 
@@ -84,20 +90,9 @@ This is an **internal staff CRM**, so access is all-or-nothing by role:
 If you later expose customer-facing self-service, replace the blanket
 `using (true)` policies with ownership predicates (e.g. `customer_id = auth.uid()`).
 
-## Getting started
+## Running the demo
 
-### 1. Create a staff user
-
-RLS grants access to authenticated users only, so you need a login before the UI
-shows anything. In the [dashboard](https://supabase.com/dashboard/project/qqjbomzxqvbauutvhrpk/auth/users):
-
-**Authentication → Users → Add user → Create new user**, tick
-*Auto Confirm User*, and set an email + password.
-
-### 2. Run the front end
-
-No build step and no dependencies — it imports `supabase-js` from a CDN as an ES
-module. It must be served over HTTP (not `file://`) for module imports to work:
+No login, no keys, no setup:
 
 ```bash
 cd web
@@ -105,16 +100,13 @@ python3 -m http.server 5173
 # open http://localhost:5173
 ```
 
-Sign in with the staff user from step 1.
+### Why fixtures instead of opening up the database
 
-### 3. Working on the schema
-
-```bash
-supabase link --project-ref qqjbomzxqvbauutvhrpk
-supabase migration new <name>     # never hand-name migration files
-supabase db push                  # apply to the remote project
-supabase db advisors --linked     # security + performance lints
-```
+Git branches do not branch Postgres. Granting `anon` read access so this branch
+could skip the login would have made the live `customers` table readable from
+`main` too — and the publishable key ships to every browser regardless of
+whether the repo is public or private. Bundling the data is the only version of
+"no login" that leaves the real database untouched.
 
 ## What's in the UI
 

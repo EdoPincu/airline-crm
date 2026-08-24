@@ -1,7 +1,8 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
+import { createDemoClient, resetDemoData } from "./demo-store.js";
 
-const { url, key } = window.CRM_CONFIG;
-const db = createClient(url, key);
+// Demo branch: no Supabase connection and no auth. Data is bundled fixtures
+// held in localStorage, so nothing here can reach the live database.
+const db = createDemoClient();
 const root = document.getElementById("root");
 
 const state = { view: "dashboard", session: null, flights: [], customers: [], orders: [], q: "", modal: null };
@@ -53,30 +54,6 @@ async function mutate(fn, okMsg) {
   if (okMsg) toast(okMsg);
 }
 
-/* ------------------------------------------------------------------ auth */
-function renderAuth(err) {
-  root.innerHTML = `
-    <div class="auth-wrap"><form class="auth-card" id="login">
-      <div class="brand"><div class="brand-mark">✈</div>
-        <div><div class="brand-name">Skyline CRM</div><div class="brand-sub">Airline operations</div></div></div>
-      <h1>Staff sign in</h1>
-      <p class="sub">Customer records are RLS-protected. Sign in to continue.</p>
-      ${err ? `<div class="auth-err">${esc(err)}</div>` : ""}
-      <div class="field"><label for="em">Email</label><input id="em" type="email" required autocomplete="username"></div>
-      <div class="field"><label for="pw">Password</label><input id="pw" type="password" required autocomplete="current-password"></div>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px">Sign in</button>
-    </form></div>`;
-  document.getElementById("login").onsubmit = async (e) => {
-    e.preventDefault();
-    const { error } = await db.auth.signInWithPassword({
-      email: e.target.em.value.trim(),
-      password: e.target.pw.value,
-    });
-    if (error) renderAuth(error.message);
-    else boot();
-  };
-}
-
 /* ----------------------------------------------------------------- shell */
 const NAV = [
   ["dashboard", "◧", "Dashboard"],
@@ -97,9 +74,9 @@ function render() {
             `<button data-view="${id}" ${v === id ? 'aria-current="page"' : ""}><span aria-hidden="true">${ic}</span>${label}</button>`).join("")}
         </nav>
         <div class="sidebar-foot">
-          <div class="who">${esc(state.session?.user?.email || "")}</div>
+          <div class="who"><span class="pill pill-warn">Demo mode</span></div>
           <button class="btn btn-sm" id="theme">Toggle theme</button>
-          <button class="btn btn-sm" id="signout">Sign out</button>
+          <button class="btn btn-sm" id="reset">Reset demo data</button>
         </div>
       </aside>
       <main class="main">${
@@ -114,8 +91,14 @@ function render() {
 
 function wire() {
   root.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => { state.view = b.dataset.view; state.q = ""; render(); }));
-  const so = document.getElementById("signout");
-  if (so) so.onclick = async () => { await db.auth.signOut(); state.session = null; renderAuth(); };
+  const rs = document.getElementById("reset");
+  if (rs) rs.onclick = async () => {
+    if (!confirm("Reset the demo data back to its original state?")) return;
+    resetDemoData();
+    await loadAll();
+    render();
+    toast("Demo data reset");
+  };
   const th = document.getElementById("theme");
   if (th) th.onclick = () => {
     const cur = document.documentElement.getAttribute("data-theme");
@@ -385,9 +368,6 @@ try {
 } catch {}
 
 async function boot() {
-  const { data } = await db.auth.getSession();
-  state.session = data.session;
-  if (!state.session) return renderAuth();
   await loadAll();
   render();
 }
